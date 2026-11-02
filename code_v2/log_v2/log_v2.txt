@@ -1,0 +1,41 @@
+main_alpha : lỗi thư viện CVX -  cần cài lại
+
+CVX : PHẢI KHỞI TẠO PATH CVX ĐỂ MATLAB READ LIB, KO LÀ DIE CẢ ĐÁM
+
+%thêm cái này vào ko là banh xác, ko thêm thì đừng hỏi sao nó ko chạy
+addpath('...\Dropbox\DATN-KyI-25_26\NHOMDATN\team_progress\Simulate\code_v2\cvx');
+cvx_setup
+%thêm cái này vào, ko là banh xác, ko thêm thì đừng hỏi sao nó ko chạy
+
+
+Các phương pháp trong code mô phỏng :
+%% 1. PHƯƠNG PHÁP 1: BAC-NOMA PROPOSED (ĐỀ XUẤT)
+% Tương ứng với: "BAC-NOMA with optimal resource allocation" trong bài báo
+% Code: Phần CVX ĐẦU TIÊN với minimize(-a'*y)
+cvx_begin quiet
+    minimize(  -a'*y )  % TỐI ƯU HÓA RATE
+cvx_end
+ratex(ix) = log2(1+abar'*p/(d'*p +sigman));  % Lưu vào ratex
+
+%% 2. PHƯƠNG PHÁP 2: BAC-NOMA RANDOM (UPPER BOUND)
+% Tương ứng với: "BAC-NOMA with random resource allocation" trong Section IV
+% Code: Phần CVX THỨ HAI với minimize(1)
+cvx_begin quiet
+    minimize(  1 )  % CHỈ TÌM FEASIBLE SOLUTION (KHÔNG TỐI ƯU)
+cvx_end
+ratex2(ix) = log2(1+abar'*p2*sc/(d'*p2*sc +sigman));  % Lưu vào ratex2
+
+%% 3. PHƯƠNG PHÁP 3: FD-OMA 
+% Tương ứng với: "BAC-OMA" trong bài báo (Benchmark 1)
+% Code: Phần CVX THỨ BA chỉ với 1 BD (M=1)
+cvx_begin quiet
+    minimize(  -ax'*y3 )  % TỐI ƯU CHO CHỈ 1 BD
+cvx_end
+ratex3(ix) = log2(1+abarx'*p3/(dx'*p3 +sigman));  % Lưu vào ratex3
+
+
+
+	Tên trong code	Tên trong bài báo	Mô tả	Điểm khác biệt
+	ratex / rate1	BAC-NOMA proposed	NOMA + tối ưu công suất bằng LP	TỐI ƯU HÓA rate uplink
+	ratex2 / rate2	BAC-NOMA random	NOMA + phân bổ công suất ngẫu nhiên	CHỈ đảm bảo constraints, không tối ưu
+	ratex3 / rate3	FD-OMA (BAC-OMA)	OMA + chỉ 1 BD được truyền	CHỈ 1 BD hoạt động mỗi lần

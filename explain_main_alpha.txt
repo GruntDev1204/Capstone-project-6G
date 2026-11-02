@@ -1,0 +1,252 @@
+%% =========================================================================
+%% CODE GỐC BAC-NOMA - COMMENT CHI TIẾT TỪNG DÒNG
+%% MAP ĐẾN ĐÚNG MỤC TRONG BÀI BÁO IEEE
+%% =========================================================================
+
+% VẼ FIG.5 trong bài báo: Rate vs α (tự can nhiễu)
+% Lặp theo α: [0.1, 0.05, 0.01, 0.005, 0.001]
+% M = 5 cố định, R0 = 3 BPCU
+% "Ảnh hưởng của hệ số tự can nhiễu FD đến performance"
+
+clear all  % Xóa tất cả biến trong workspace
+
+% ===== SECTION IV: NUMERICAL STUDIES - THIẾT LẬP THAM SỐ =====
+snrdb = [20 ]; % Pmax = 20dBm ( thay từ 15 - 30) (xuất hiện trong caption của Fig.3,4,5)
+ct=100; % Số lượng mẫu Monte Carlo để làm mượt đường cong
+Mx=[2 :2: 10]; % Các giá trị M cho Fig.4 (không dùng ở code này)
+disc = 5; % BD nằm trong vùng vuông [-5,5]m (Section IV đoạn 2)
+d0=3;  % Vị trí user downlink U0: [3,0]m (Section IV đoạn 2)
+al=3; % Path loss exponent = 3 (Section IV đoạn 2)
+alpha_vector =  [0.1 0.05 0.01 0.005 0.001]; % Các giá trị α cho Fig.5
+
+% Eq.(1),(2): σ² là công suất nhiễu
+sigma2_dbm= -94; % -94dBm (Section IV đoạn 2)
+sigman=10^((sigma2_dbm-30)/10); % Chuyển từ dBm sang Watt
+
+% Eq.(P2): ϵ0 = 2^R0 - 1 (công thức Shannon)
+R0=3; % Target rate của U0 = 3 BPCU (caption Fig.5)   
+eps0 = 2^R0-1; % Tính ϵ0 từ R0
+
+% ===== VÒNG LẶP THEO α (CHO FIG.5) =====
+for ki = 1:  length(alpha_vector)  % Lặp qua các giá trị α
+    M=5; % Số BD = 5 (Fig.5 dùng M=5 cố định)
+    alpha = alpha_vector(ki); % Lấy giá trị α hiện tại
+    Pmax = 10^((snrdb-30)/10); % Tính Pmax (W) từ Eq.(P1d)
+        
+    % ===== MONTE CARLO SIMULATION =====
+    for ix = 1 :ct  % Lặp ct lần (100 lần)            
+        %% === MÔ HÌNH KÊNH TRUYỀN (SECTION II: SYSTEM MODEL) ===
+        
+        % Eq.(1): h_m - kênh từ BD_m tới BS
+        hfading = complex(sqrt(0.5)*randn(M,1),sqrt(0.5)*randn(M,1)); % Tạo fading Rayleigh phức
+        locm = sign(rand(M,2)-0.5) .* disc.*rand(M,2); % Tạo vị trí ngẫu nhiên cho BD
+        dist = max(1, sqrt(sum(locm.^2,2))); % Tính khoảng cách từ BD tới BS
+        hm = (abs(hfading)).^2./dist.^al; % Tính |h_m|² với path loss (Eq.1)
+     
+        % Eq.(2): g_m - kênh từ BD_m tới U0
+        gfading = complex(sqrt(0.5)*randn(M,1),sqrt(0.5)*randn(M,1)); % Fading cho BD-U0
+        lxx = [d0*ones(M,1) zeros(M,1)]; % Tạo ma trận vị trí U0: [d0, 0] lặp M lần
+        dist2 = max(1, sqrt(sum((locm-lxx).^2,2))); % Tính khoảng cách từ BD tới U0
+        gm = (abs(gfading)).^2./dist2.^al; % Tính |g_m|² với path loss (Eq.2)
+     
+        % Eq.(4): h_0 - kênh từ BS tới U0
+        h0fading = complex(sqrt(0.5)*randn(1,1),sqrt(0.5)*randn(1,1)); % Fading cho BS-U0
+        h0 = (abs(h0fading))^2/d0^al; % Tính |h_0|² với path loss (Eq.4)
+     
+        % Eq.(1): h_SI - kênh tự can nhiễu FD
+        hsi = abs( complex(sqrt(0.5)*randn(1,1),sqrt(0.5)*randn(1,1)) )^2; % |h_SI|²
+     
+        % Eq.(3): |s_0|² - công suất tín hiệu downlink
+        s0 = abs( complex(sqrt(0.5)*randn(1,1),sqrt(0.5)*randn(1,1)) )^2; % |s_0|²
+      
+        %% === SECTION III: OPTIMAL RESOURCE ALLOCATION ===
+        %% --- CHUẨN BỊ MA TRẬN CHO PROBLEM (P5) ---
+        
+        % Eq.(7): Vector a = [0; |h_1|⁴; ...; |h_M|⁴]
+        % DÙNG CHO AVERAGE RATE (Problem P1)
+        a = [0 ; hm.^2]; % hm.^2 = |h_m|⁴ vì hm đã là |h_m|²
+     
+        % Eq.(7): Vector d = [α|h_SI|²; 0; ...; 0]
+        d = [alpha*hsi; zeros(M,1)]; % Chỉ phần tử đầu khác 0
+     
+        % Eq.(7): a₁ = [ϵ₀|g₁|²|h₁|², ..., ϵ₀|g_M|²|h_M|²]
+        a1 = eps0* (gm.*hm)'; % gm.*hm = |g_m|²|h_m|², chuyển thành hàng
+     
+        scale = d0^al; % Scaling factor để ổn định số học (nhân với d0^al)
+     
+        % Eq.(P5b): Ma trận A và vector b cho LP
+        % A = [-|h₀|²   a₁;
+        %       0      -I;
+        %      -1        I;
+        %      -1       0;
+        %       1       0]
+        A = [-h0*scale a1*scale;  % Hàng 1: constraint (P2b) sau biến đổi
+             zeros(M,1) -eye(M);  % Hàng 2: constraint P_m ≥ 0
+             -ones(M,1) eye(M);   % Hàng 3: constraint P_m ≤ P_0
+             -1 zeros(1,M);       % Hàng 4: constraint P_0 ≥ 0
+             1 zeros(1,M)];       % Hàng 5: constraint P_0 ≤ P_max
+             
+        % b = [-ϵ₀σ², 0, ..., 0, 0, Pmax]ᵀ
+        b = [-eps0*sigman zeros(1,M) zeros(1,1) 0 Pmax]'; % Vector b
+
+        %% --- GIẢI PROBLEM (P5): BAC-NOMA PROPOSED ---
+        cvx_begin quiet  % Bắt đầu CVX optimization
+            variables y(M+1) z  % Khai báo biến: y = p/(dᵀp+σ²), z = 1/(dᵀp+σ²)
+            dual variables t1 t2 t3  % Biến dual cho constraints
+            minimize(  -a'*y )  % Tương đương maximize aᵀy (Problem P5a)
+            subject to  % Các ràng buộc
+               t1 : A*y - b*z <= 0;  % Constraints A*y ≤ b*z (P5b)
+               t3 : d'*y + sigman*z == 1;  % Constraint dᵀy + σ²z = 1 (P5b)
+               t2 : z >= 0;  % z ≥ 0 (P5b)
+        cvx_end
+    
+        % Tính INSTANTANEOUS RATE từ optimal solution
+        % Eq.(3): R_sum với |s₀|² cụ thể
+        abar = [0 ; hm.^2 * s0];  % a_bar = |s₀|² * a (Eq.15)
+        p = y/z;  % Khôi phục p từ y và z (p = y/z)
+        
+        % Eq.(3): R_sum = log(1 + (Σ η_m P₀|h_m|⁴|s₀|²) / (αP₀|h_SI|² + σ²))
+        % Tử số: abar'*p = Σ |h_m|⁴|s₀|² * P_m
+        % Mẫu số: d'*p + sigman = αP₀|h_SI|² + σ²
+        ratex(ix) = log2(1 + abar'*p / (d'*p + sigman)); % Tính rate (bps/Hz)
+     
+        %% --- BENCHMARK 1: UPPER BOUND (RANDOM RESOURCE ALLOCATION) ---
+        % Tương ứng Benchmark 2 trong Section IV
+        % "BAC-NOMA with random resource allocation" - Problem (P9)
+        cvx_begin quiet
+            variables y2(M+1) z2  % Biến cho benchmark 1
+            dual variables t21 t22 t23 
+            minimize(  1 )  % Chỉ tìm feasible solution (không optimize rate)
+            subject to
+               t21 : A*y2 - b*z2 <= 0;  % Cùng constraints
+               t23 : d'*y2 + sigman*z2 == 1;
+               t22 : z2 >= 0;
+        cvx_end     
+        
+        p2 = y2/z2;  % Khôi phục công suất
+        sc = 1; % Scaling factor
+        ratex2(ix) = log2(1 + abar'*p2*sc / (d'*p2*sc + sigman)); % Tính rate
+     
+        %% --- BENCHMARK 2: FD-OMA ---
+        % Tương ứng Benchmark 1 trong Section IV: "BAC-OMA"
+        % Chỉ chọn 1 BD (M=1) tốt nhất theo round-robin
+        % Ở đây chọn BD đầu tiên làm đại diện
+        
+        ax = [0 ; hm(1).^2];  % Chỉ |h₁|⁴ (cho BD đầu tiên)
+        dx = [alpha*hsi; zeros(1,1)];  % Chỉ self-interference
+        ax1 = eps0* (gm(1).*hm(1));  % Chỉ ϵ₀|g₁|²|h₁|²
+        
+        % Ma trận A cho M=1
+        Ax = [-h0*scale ax1*scale;  % Tương tự A nhưng chỉ 1 BD
+              zeros(1,1) -eye(1);
+              -ones(1,1) eye(1); 
+              -1 zeros(1,1); 
+              1 zeros(1,1)];
+        bx = [-eps0*sigman zeros(1,1) zeros(1,1) 0 Pmax]'; % Vector b cho 1 BD
+
+        % Giải LP cho OMA
+        cvx_begin quiet
+            variables y3(1+1) z3  % Biến cho OMA (2 biến: P₀ và P₁)
+            dual variables t31 t32 t33 
+            minimize(  -ax'*y3 )  % Maximize axᵀy3
+            subject to
+               t31 : Ax*y3 - bx*z3 <= 0;  % Constraints cho 1 BD
+               t33 : dx'*y3 + sigman*z3 == 1;
+               t32 : z3 >= 0;
+        cvx_end
+        
+        p3 = y3/z3;  % Khôi phục công suất
+        abarx = [0 ; hm(1)^2 * s0];  % |h₁|⁴|s₀|²
+        ratex3(ix) = log2(1 + abarx'*p3 / (dx'*p3 + sigman)); % Tính rate OMA
+    end 
+    
+    %% === TÍNH TRUNG BÌNH MONTE CARLO ===
+    rate1(ki) = mean(ratex)   % Proposed BAC-NOMA (lưu vào rate1)
+    rate2(ki) = mean(ratex2)  % Random allocation (Upper bound)
+    rate3(ki) = mean(ratex3)  % FD-OMA
+end
+
+%% === VẼ ĐỒ THỊ FIG.5 ===
+% Fig.5: Average sum rates vs α với M=5, R0=3 BPCU
+plot(alpha_vector, rate3, alpha_vector, rate2, alpha_vector, rate1)
+xlabel('\alpha (FD residual interference coefficient)')
+ylabel('Average sum rate (bits/s/Hz)')
+legend('BAC-OMA', 'BAC-NOMA random', 'BAC-NOMA proposed')
+grid on
+
+%% =========================================================================
+%% BẢNG TÓM TẮT CUỐI FILE - GOM TẤT CẢ THÔNG TIN QUAN TRỌNG
+%% =========================================================================
+
+%% BẢNG 1: THAM SỐ HỆ THỐNG (SECTION IV)
+% -------------------------------------------------------------------------
+% | Tham số      | Giá trị          | Xuất hiện trong bài báo            |
+% |--------------|------------------|------------------------------------|
+% | snrdb        | 20 dBm           | Fig.3,4,5 caption                  |
+% | ct           | 100 samples      | Monte Carlo để làm mượt đường cong |
+% | disc         | 5m               | Section IV paragraph 2             |
+% | d0           | 3m               | Section IV paragraph 2             |
+% | al           | 3 (path loss)    | Section IV paragraph 2             |
+% | alpha_vector | [0.1 ... 0.001]  | Fig.5                              |
+% | sigma2_dbm   | -94 dBm          | Section IV paragraph 2             |
+% | R0           | 3 BPCU           | Fig.5 caption                      |
+% -------------------------------------------------------------------------
+
+%% BẢNG 2: BIẾN KÊNH TRUYỀN (SECTION II: SYSTEM MODEL)
+% -------------------------------------------------------------------------
+% | Biến MATLAB | Ký hiệu bài báo | Ý nghĩa                          | Eq. |
+% |-------------|-----------------|----------------------------------|-----|
+% | hm          | |h_m|²          | Kênh BD_m → BS                   | (1) |
+% | gm          | |g_m|²          | Kênh BD_m → U0                   | (2) |
+% | h0          | |h_0|²          | Kênh BS → U0                     | (4) |
+% | hsi         | |h_SI|²         | Kênh tự can nhiễu FD             | (1) |
+% | s0          | |s_0|²          | Công suất tín hiệu downlink      | (3) |
+% -------------------------------------------------------------------------
+
+%% BẢNG 3: BÀI TOÁN TỐI ƯU (SECTION III: OPTIMAL RESOURCE ALLOCATION)
+% -------------------------------------------------------------------------
+% | Biến MATLAB | Bài báo | Ý nghĩa                                | Eq./Prob |
+% |-------------|---------|----------------------------------------|----------|
+% | a           | a       | Vector [0; |h_1|⁴; ...; |h_M|⁴]       | (7)      |
+% | d           | d       | Vector [α|h_SI|²; 0; ...; 0]          | (7)      |
+% | a1          | a₁      | ϵ₀[|g₁|²|h₁|², ..., |g_M|²|h_M|²]     | (7)      |
+% | A, b        | A, b    | Ma trận và vector ràng buộc           | (P5b)    |
+% | y, z        | y, z    | y=p/(dᵀp+σ²), z=1/(dᵀp+σ²)            | (P5)     |
+% | p           | p       | Vector công suất [P₀; P₁; ...; P_M]   | (P5)     |
+% -------------------------------------------------------------------------
+
+%% BẢNG 4: CÔNG THỨC TÍNH RATE
+% -------------------------------------------------------------------------
+% | Biến MATLAB   | Công thức bài báo           | Ý nghĩa                  |
+% |---------------|-----------------------------|--------------------------|
+% | abar          | ā = |s₀|²a                 | Eq.(15)                  |
+% | abar'*p       | Σ|h_m|⁴|s₀|²P_m           | Tử số Eq.(3)             |
+% | d'*p + sigman | αP₀|h_SI|² + σ²           | Mẫu số Eq.(3)            |
+% | ratex         | R_sum = log(1 + SINR)      | Eq.(3)                   |
+% -------------------------------------------------------------------------
+
+%% BẢNG 5: CÁC PHƯƠNG PHÁP SO SÁNH (SECTION IV)
+% -------------------------------------------------------------------------
+% | Tên phương pháp  | Mô tả trong bài báo          | Code thực hiện         |
+% |------------------|------------------------------|------------------------|
+% | Proposed (rate1) | BAC-NOMA với tối ưu LP       | CVX minimize(-a'y)    |
+% | Random (rate2)   | BAC-NOMA random allocation   | CVX minimize(1)       |
+% | FD-OMA (rate3)   | BAC-OMA với 1 BD             | Giải LP với M=1       |
+% -------------------------------------------------------------------------
+
+%% BẢNG 6: KẾT QUẢ VÀ ĐỒ THỊ
+% -------------------------------------------------------------------------
+% | Biến kết quả | Tương ứng đồ thị | Mô tả                              |
+% |--------------|------------------|------------------------------------|
+% | rate1        | Đường proposed   | BAC-NOMA với tối ưu (Fig.5)       |
+% | rate2        | Đường random     | BAC-NOMA random allocation (Fig.5) |
+% | rate3        | Đường FD-OMA     | BAC-OMA (Fig.5)                   |
+% -------------------------------------------------------------------------
+
+%% TÓM TẮT QUAN TRỌNG:
+% 1. CODE NÀY VẼ FIG.5: Rate vs α với M=5, R0=3 BPCU
+% 2. CÓ 3 PHƯƠNG PHÁP: Proposed (tối ưu), Random, FD-OMA
+% 3. DÙNG INSTANTANEOUS RATE nhưng optimize với average rate parameters
+% 4. CHUYỂN PROBLEM (P4) → (P5) bằng biến đổi LP để giải dễ hơn
+% 5. CONSTRAINT QUAN TRỌNG: Đảm bảo rate U0 ≥ R0 (QoS constraint)
+%% =========================================================================

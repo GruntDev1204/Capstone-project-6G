@@ -1,0 +1,10 @@
+Hướng dẫn cài CVX : https://www.youtube.com/watch?v=RDy-uPN_gbY
+
+
+
+CVX : PHẢI KHỞI TẠO PATH CVX ĐỂ MATLAB READ LIB, KO LÀ DIE CẢ ĐÁM
+
+%thêm cái này vào ko là banh xác, ko thêm thì đừng hỏi sao nó ko chạy
+addpath('...\Dropbox\DATN-KyI-25_26\NHOMDATN\team_progress\Simulate\code_v2\cvx');
+cvx_setup
+%thêm cái này vào, ko là banh xác, ko thêm thì đừng hỏi sao nó ko chạy

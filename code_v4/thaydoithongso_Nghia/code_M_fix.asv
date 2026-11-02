@@ -1,0 +1,132 @@
+clear all
+clc
+tic
+
+snrdb = 10:1:30;     % SNR sweep (dBm)
+ct = 20;             % Monte Carlo runs
+M = 6;               % number of devices (FIXED)
+
+disc = 5;            % BD users area
+d0 = 3;              % downlink user distance
+al = 3;              % path-loss exponent
+alpha = 0.0001;        % fixed alpha
+
+sigma2_dbm = -94;    
+sigman = 10^((sigma2_dbm-30)/10);
+
+R0 = 3;              
+eps0 = 2^R0 - 1;
+
+rate1 = zeros(length(snrdb),1);
+rate2 = zeros(length(snrdb),1);
+rate3 = zeros(length(snrdb),1);
+
+for ks = 1:length(snrdb)
+
+    Pmax = 10^((snrdb(ks)-30)/10);
+
+    ratex  = zeros(ct,1);
+    ratex2 = zeros(ct,1);
+    ratex3 = zeros(ct,1);
+
+    for ix = 1:ct
+
+        %% BD users
+        hfading = complex(randn(M,1),randn(M,1))/sqrt(2);
+        locm = sign(rand(M,2)-0.5).*disc.*rand(M,2);
+        dist = max(1, sqrt(sum(locm.^2,2)));
+        hm = abs(hfading).^2 ./ dist.^al;
+
+        gfading = complex(randn(M,1),randn(M,1))/sqrt(2);
+        lxx = [d0*ones(M,1) zeros(M,1)];
+        dist2 = max(1, sqrt(sum((locm-lxx).^2,2)));
+        gm = abs(gfading).^2 ./ dist2.^al;
+
+        %% Downlink user
+        h0 = abs(complex(randn,randn)/sqrt(2))^2 / d0^al;
+
+        %% Self interference
+        hsi = abs(complex(randn,randn)/sqrt(2))^2;
+
+        %% Signal
+        s0 = abs(complex(randn,randn)/sqrt(2))^2;
+
+        %% NOMA optimization
+        a = [0 ; hm.^2];
+        d = [alpha*hsi ; zeros(M,1)];
+        a1 = eps0*(gm.*hm)';
+        scale = d0^al;
+
+        A = [-h0*scale  a1*scale;
+              zeros(M,1) -eye(M);
+             -ones(M,1)   eye(M);
+             -1           zeros(1,M);
+              1           zeros(1,M)];
+
+        b = [-eps0*sigman zeros(1,M) zeros(1,M) 0 Pmax]';
+
+        cvx_begin quiet
+            variables y(M+1) z
+            maximize( a'*y )
+            subject to
+                A*y - b*z <= 0;
+                d'*y + sigman*z == 1;
+                z >= 0;
+        cvx_end
+
+        p = y/z;
+        abar = [0 ; hm.^2*s0];
+        ratex(ix) = log2(1 + abar'*p/(d'*p + sigman));
+
+        %% Upper bound
+        cvx_begin quiet
+            variables y2(M+1) z2
+            minimize( 1 )
+            subject to
+                A*y2 - b*z2 <= 0;
+                d'*y2 + sigman*z2 == 1;
+                z2 >= 0;
+        cvx_end
+
+        p2 = y2/z2;
+        ratex2(ix) = log2(1 + abar'*p2/(d'*p2 + sigman));
+
+        %% FD-OMA (single device)
+        ax = [0 ; hm(1)^2];
+        dx = [alpha*hsi ; 0];
+        abarx = [0 ; hm(1)^2*s0];
+
+        Ax = [-h0*scale eps0*gm(1)*hm(1)*scale; zeros(1,1) -eye(1);-ones(1,1) eye(1); -1 zeros(1,1); 1 zeros(1,1)];
+
+        bx = [-eps0*sigman zeros(1,1) zeros(1,1) 0 Pmax]';
+
+        cvx_begin quiet
+            variables y3(2) z3
+            maximize( ax'*y3 )
+            subject to
+                Ax*y3 - bx*z3 <= 0;
+                dx'*y3 + sigman*z3 == 1;
+                z3 >= 0;
+        cvx_end
+
+        p3 = y3/z3;
+        ratex3(ix) = log2(1 + abarx'*p3/(dx'*p3 + sigman));
+
+    end
+
+    rate1(ks) = movmean(rate1, 3);
+    rate2(ks) = movmean(rate2, 3);
+    rate3(ks) = movmean(rate3, 3);
+
+end
+
+figure
+plot(snrdb,rate1,'-o','LineWidth',1.5); hold on
+plot(snrdb,rate2,'-s','LineWidth',1.5);
+plot(snrdb,rate3,'-^','LineWidth',1.5);
+grid on
+xlabel('SNR (dBm)')
+ylabel('Average Rate (bits/s/Hz)')
+legend('Proposed','Upper Bound','FD-OMA')
+
+toc

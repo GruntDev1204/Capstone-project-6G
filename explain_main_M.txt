@@ -1,0 +1,154 @@
+clear all  % Xóa tất cả biến
+tic  % Bắt đầu đếm thời gian chạy
+
+% VẼ FIG.4 trong bài báo: Rate vs M (số lượng BD)
+% Lặp theo M: [2, 6, 10] 
+% α = 0.01 cố định (lấy từ alpha_vector(3))
+% "Ảnh hưởng của số lượng thiết bị BackCom đến performance"
+
+% =========================================================================
+%% THIẾT LẬP THAM SỐ (SECTION IV - GIỐNG FIG.4)
+%% -------------------------------------------------------------------------
+snrdb = [20 ]; % Pmax = 20dBm (giống Fig.4)
+ct=20; % Giảm số mẫu Monte Carlo để chạy nhanh hơn (Fig.4 dùng ct cao hơn)
+% ct=2000; % Dòng này bị comment - ct lớn để đồ thị mượt
+
+% M=2; % Dòng bị comment
+% Mx=[2 :2: 10]; % Dòng bị comment
+Mx=[2 :4: 10]; % Mảng số BD: [2, 6, 10] (Fig.4 dùng M từ 2 đến 10)
+disc = 5; % BD trong vùng vuông [-5,5]m (Section IV)
+d0=3;  % Vị trí U0: [3,0]m (Section IV)
+al=3; % Path loss exponent = 3 (Section IV)
+alpha_vector =  [0.1 0.05 0.01 0.005 0.001]; % Các giá trị α
+% alpha_vector =  [0.1  0.01 ]; % Dòng bị comment
+
+% Eq.(1),(2): σ² là công suất nhiễu
+sigma2_dbm= -94; % -94dBm (Section IV)
+sigman=10^((sigma2_dbm-30)/10); % Chuyển dBm → Watt
+
+% Eq.(P2): ϵ0 = 2^R0 - 1
+R0=3; % Target rate U0 = 3 BPCU (Fig.4 caption)   
+eps0 = 2^R0-1;
+
+% =========================================================================
+%% VÒNG LẶP CHÍNH THEO M (SỐ LƯỢNG BD) - CHO FIG.4
+%% -------------------------------------------------------------------------
+% LƯU Ý: Code trước lặp theo α (cho Fig.5), code NÀY lặp theo M (cho Fig.4)
+for ki = 1:length(Mx)  % Lặp qua các giá trị M: 2, 6, 10
+    M=Mx(ki);  % Lấy số BD hiện tại
+    alpha = alpha_vector(3);  % CỐ ĐỊNH α = 0.01 (phần tử thứ 3 của alpha_vector)
+    Pmax = 10^((snrdb-30)/10); % Tính Pmax từ snrdb
+    
+    % Khởi tạo biến lưu rate tạm thời (không dùng sum1, sum2)
+    for ix = 1 :ct  % Monte Carlo loop
+        %% === MÔ HÌNH KÊNH TRUYỀN (GIỐNG CODE TRƯỚC) ===
+        hfading = complex(sqrt(0.5)*randn(M,1),sqrt(0.5)*randn(M,1));
+        locm = sign(rand(M,2)-0.5) .* disc.*rand(M,2);
+        dist = max(1, sqrt(sum(locm.^2,2)));
+        hm = (abs(hfading)).^2./dist.^al; % |h_m|²
+     
+        gfading = complex(sqrt(0.5)*randn(M,1),sqrt(0.5)*randn(M,1));
+        lxx = [d0*ones(M,1) zeros(M,1)];
+        dist2 = max(1, sqrt(sum((locm-lxx).^2,2)));
+        gm = (abs(gfading)).^2./dist2.^al; % |g_m|²
+     
+        h0fading = complex(sqrt(0.5)*randn(1,1),sqrt(0.5)*randn(1,1));
+        h0 = (abs(h0fading))^2/d0^al; % |h_0|²
+     
+        hsi = abs( complex(sqrt(0.5)*randn(1,1),sqrt(0.5)*randn(1,1)) )^2; % |h_SI|²
+     
+        s0= abs( complex(sqrt(0.5)*randn(1,1),sqrt(0.5)*randn(1,1)) )^2; % |s_0|²
+      
+        %% === BÀI TOÁN TỐI ƯU (GIỐNG CODE TRƯỚC) ===
+        % Eq.(7): Vector a = [0; |h_1|⁴; ...; |h_M|⁴]
+        a = [0 ; hm.^2];
+        
+        % Eq.(7): Vector d = [α|h_SI|²; 0; ...; 0]
+        d = [alpha*hsi; zeros(M,1)];
+        
+        % Eq.(7): a₁ = [ϵ₀|g₁|²|h₁|², ..., ϵ₀|g_M|²|h_M|²]
+        a1 = eps0* (gm.*hm)';
+        
+        scale = d0^al;
+        
+        % Eq.(P5b): Ma trận A và vector b
+        A = [-h0*scale a1*scale; zeros(M,1) -eye(M);-ones(M,1) eye(M); -1 zeros(1,M); 1 zeros(1,M)];
+        b = [-eps0*sigman zeros(1,M) zeros(1,M) 0 Pmax ]';
+        
+        %% === 1. PHƯƠNG PHÁP ĐỀ XUẤT (PROPOSED) ===
+        cvx_begin quiet
+            variables y(M+1) z
+            dual variables t1 t2 t3 
+            minimize(  -a'*y )  % Tương đương maximize aᵀy
+            subject to
+               t1 : A*y-b*z<=0;
+               t3 : d'*y + sigman*z==1;
+               t2 : z >= 0;
+        cvx_end
+        
+        % Tính INSTANTANEOUS RATE
+        abar = [0 ; hm.^2*s0];  % a_bar = |s₀|² * a
+        p = y/z;  % Khôi phục p = y/z
+        ratex(ix) = log2(1+abar'*p/(d'*p +sigman)); % Eq.(3)
+     
+        %% === 2. RANDOM ALLOCATION (BENCHMARK 2) ===
+        cvx_begin quiet
+            variables y2(M+1) z2
+            dual variables t21 t22 t23 
+            minimize(  1 )  % Chỉ tìm feasible solution
+            subject to
+               t21 : A*y2-b*z2<=0;
+               t23 : d'*y2 + sigman*z2==1;
+               t22 : z2 >= 0;
+        cvx_end     
+        p2 = y2/z2;
+        sc=1; % Scaling factor
+        ratex2(ix) = log2(1+abar'*p2*sc/(d'*p2*sc +sigman));
+     
+        %% === 3. FD-OMA (BENCHMARK 1) - CHỈ CHỌN BD ĐẦU TIÊN ===
+        % LƯU Ý: ĐÂY LÀ HEURISTIC ĐƠN GIẢN - KHÔNG PHẢI ROUND-ROBIN NHƯ BÀI BÁO!
+        ax = [0 ; hm(1).^2];  % Chỉ |h₁|⁴
+        dx = [alpha*hsi; zeros(1,1)];
+        ax1 = eps0* (gm(1).*hm(1));
+        Ax = [-h0*scale ax1*scale; zeros(1,1) -eye(1);-ones(1,1) eye(1); -1 zeros(1,1); 1 zeros(1,1)];
+        bx = [-eps0*sigman zeros(1,1) zeros(1,1) 0 Pmax ]';
+        
+        cvx_begin quiet
+            variables y3(1+1) z3
+            dual variables t31 t32 t33 
+            minimize(  -ax'*y3 )
+            subject to
+               t31 : Ax*y3-bx*z3<=0;
+               t33 : dx'*y3 + sigman*z3==1;
+               t32 : z3 >= 0;
+        cvx_end
+        p3 = y3/z3;
+        abarx = [0 ; hm(1)^2*s0];
+        ratex3(ix) = log2(1+abarx'*p3/(dx'*p3 +sigman));
+    end 
+    
+    %% === TÍNH TRUNG BÌNH ===
+    rate1(ki) = mean(ratex);   % Proposed
+    rate2(ki) = mean(ratex2);  % Random
+    rate3(ki) = mean(ratex3);  % FD-OMA
+end
+
+%% =========================================================================
+%% VẼ ĐỒ THỊ FIG.4: RATE vs SỐ LƯỢNG BD (M)
+%% -------------------------------------------------------------------------
+plot(Mx,rate3, Mx,rate2,Mx,rate1)
+xlabel('Number of BackCom Devices (M)')
+ylabel('Average sum rate (bits/s/Hz)')
+legend('FD-OMA', 'BAC-NOMA random', 'BAC-NOMA proposed', 'Location','best')
+grid on
+
+% plot(alpha_vector,rate3, alpha_vector,rate2,alpha_vector,rate1) % DÒNG NÀY BỊ COMMENT
+toc  % Hiển thị thời gian chạy
+
+
+% Sửa FD-OMA thành round-robin thực sự
+% Thay vì chỉ chọn BD đầu tiên, cần chọn BD ngẫu nhiên hoặc round-robin
+% random_bd_index = randi(M);  % Chọn ngẫu nhiên 1 BD
+% ax = [0 ; hm(random_bd_index).^2];
+% ax1 = eps0* (gm(random_bd_index).*hm(random_bd_index));
+% ... phần còn lại giữ nguyên
